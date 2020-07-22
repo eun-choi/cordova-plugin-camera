@@ -31,6 +31,7 @@ import android.webkit.MimeTypeMap;
 import org.apache.cordova.CordovaInterface;
 import org.apache.cordova.LOG;
 
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -50,7 +51,16 @@ public class FileHelper {
      */
     @SuppressWarnings("deprecation")
     public static String getRealPath(Uri uri, CordovaInterface cordova) {
-        return FileHelper.getRealPathFromURI(cordova.getActivity(), uri);
+        String realPath = null;
+
+        if (Build.VERSION.SDK_INT < 11)
+            realPath = FileHelper.getRealPathFromURI_BelowAPI11(cordova.getActivity(), uri);
+
+        // SDK >= 11
+        else
+            realPath = FileHelper.getRealPathFromURI_API11_And_Above(cordova.getActivity(), uri);
+
+        return realPath;
     }
 
     /**
@@ -66,9 +76,11 @@ public class FileHelper {
     }
 
     @SuppressLint("NewApi")
-    public static String getRealPathFromURI(final Context context, final Uri uri) {
+    public static String getRealPathFromURI_API11_And_Above(final Context context, final Uri uri) {
+
+        final boolean isKitKat = Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT;
         // DocumentProvider
-        if (DocumentsContract.isDocumentUri(context, uri)) {
+        if (isKitKat && DocumentsContract.isDocumentUri(context, uri)) {
 
             // ExternalStorageProvider
             if (isExternalStorageDocument(uri)) {
@@ -131,6 +143,9 @@ public class FileHelper {
             // Return the remote address
             if (isGooglePhotosUri(uri))
                 return uri.getLastPathSegment();
+
+            if (isFileProviderUri(context, uri))
+                return getFileProviderPath(context, uri);
 
             return getDataColumn(context, uri, null, null);
         }
@@ -315,5 +330,28 @@ public class FileHelper {
      */
     public static boolean isGooglePhotosUri(Uri uri) {
         return "com.google.android.apps.photos.content".equals(uri.getAuthority());
+    }
+
+    /**
+     * @param context The Application context
+     * @param uri The Uri is checked by functions
+     * @return Whether the Uri authority is FileProvider
+     */
+    public static boolean isFileProviderUri(final Context context, final Uri uri) {
+        final String packageName = context.getPackageName();
+        final String authority = new StringBuilder(packageName).append(".provider").toString();
+        return authority.equals(uri.getAuthority());
+    }
+
+    /**
+     * @param context The Application context
+     * @param uri The Uri is checked by functions
+     * @return File path or null if file is missing
+     */
+    public static String getFileProviderPath(final Context context, final Uri uri)
+    {
+        final File appDir = context.getExternalFilesDir(Environment.DIRECTORY_PICTURES);
+        final File file = new File(appDir, uri.getLastPathSegment());
+        return file.exists() ? file.toString(): null;
     }
 }
