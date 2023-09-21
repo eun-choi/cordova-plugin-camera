@@ -21,10 +21,13 @@ package org.apache.cordova.camera;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.PendingIntent;
+import android.app.RecoverableSecurityException;
 import android.content.ActivityNotFoundException;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.content.IntentSender;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.database.Cursor;
@@ -80,6 +83,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
     private static final int PICTURE = 0;               // allow selection of still pictures only. DEFAULT. Will return format specified via DestinationType
     private static final int VIDEO = 1;                 // allow selection of video only, ONLY RETURNS URL
     private static final int ALLMEDIA = 2;              // allow selection from all media types
+    private static final int RECOVERABLE_DELETE_REQUEST = 3;  // Result of Recoverable Security Exception
 
     private static final int JPEG = 0;                  // Take a picture of type JPEG
     private static final int PNG = 1;                   // Take a picture of type PNG
@@ -133,6 +137,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
     private String croppedFilePath;
     private ExifHelper exifData;            // Exif data from source
     private String applicationId;
+    private Uri pendingDeleteMediaUri;
 
 
     /**
@@ -908,6 +913,20 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                 this.failPicture("Selection did not complete!");
             }
         }
+        // retry media store deletion ...
+        else if(requestCode == RECOVERABLE_DELETE_REQUEST){
+            if (resultCode == Activity.RESULT_OK) {
+                ContentResolver contentResolver = this.cordova.getActivity().getContentResolver();
+                try {
+                    contentResolver.delete(this.pendingDeleteMediaUri, null, null);
+                } catch (Exception e) {
+                    LOG.e(LOG_TAG, "Unable to delete media store file after permission was granted");
+                }
+                    this.pendingDeleteMediaUri = null;
+            } else {
+                LOG.e(LOG_TAG, "Failed to delete file. Permission not granted.");
+            }
+        }
     }
 
     private int exifToDegrees(int exifOrientation) {
@@ -1274,8 +1293,30 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                 id--;
             }
             Uri uri = Uri.parse(contentStore + "/" + id);
-            this.cordova.getActivity().getContentResolver().delete(uri, null, null);
-            cursor.close();
+            try {
+                this.cordova.getActivity().getContentResolver().delete(uri, null, null);
+            } catch (SecurityException securityException) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    RecoverableSecurityException recoverableSecurityException;
+                    if (securityException instanceof RecoverableSecurityException) {
+                        recoverableSecurityException = (RecoverableSecurityException) securityException;
+                    } else {
+                        throw new RuntimeException(securityException.getMessage(), securityException);
+                    }
+                    IntentSender requestPermission = recoverableSecurityException.getUserAction().getActionIntent().getIntentSender();
+                    try {
+                        this.cordova.setActivityResultCallback(this);
+                        this.cordova.getActivity().startIntentSenderForResult(requestPermission, 
+                            RECOVERABLE_DELETE_REQUEST, null, 0, 0, 0, null);
+                    } catch (IntentSender.SendIntentException e) {
+                    e.printStackTrace();
+                }
+                } else {
+                    throw new RuntimeException(securityException.getMessage(), securityException);
+                }
+            } finally {
+                cursor.close();
+            }
         }
     }
 
@@ -1349,20 +1390,39 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
     }
 
     public void onRequestPermissionResult(int requestCode, String[] permissions,
-                                          int[] grantResults) {
-        for (int r : grantResults) {
-            if (r == PackageManager.PERMISSION_DENIED) {
-                this.callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.ERROR, PERMISSION_DENIED_ERROR));
-                return;
+                                        int[] grantResults) throws JSONException {
+        String version = android.os.Build.VERSION.RELEASE;
+        if(Integer.parseInt(version) == 13)
+        {
+            if(PermissionHelper.hasPermission(this, Manifest.permission.CAMERA)) {
+                switch (requestCode) {
+                    case TAKE_PIC_SEC:
+                        takePicture(this.destType, this.encodingType);
+                        break;
+                    case SAVE_TO_ALBUM_SEC:
+                        this.getImage(this.srcType, this.destType);
+                        break;
+                }
+            }
+            else {
+                PermissionHelper.hasPermission(this, Manifest.permission.CAMERA);
             }
         }
-        switch (requestCode) {
-            case TAKE_PIC_SEC:
-                takePicture(this.destType, this.encodingType);
-                break;
-            case SAVE_TO_ALBUM_SEC:
-                this.getImage(this.srcType, this.destType);
-                break;
+        else{
+            for (int r : grantResults) {
+                if (r == PackageManager.PERMISSION_DENIED) {
+                    this.callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.ERROR, PERMISSION_DENIED_ERROR));
+                    return;
+                }
+            }
+            switch (requestCode) {
+                case TAKE_PIC_SEC:
+                    takePicture(this.destType, this.encodingType);
+                    break;
+                case SAVE_TO_ALBUM_SEC:
+                    this.getImage(this.srcType, this.destType);
+                    break;
+            }
         }
     }
 
