@@ -301,6 +301,7 @@ static NSString* toBase64(NSData* data) {
 - (void)navigationController:(UINavigationController *)navigationController willShowViewController:(UIViewController *)viewController animated:(BOOL)animated
 {
     if([navigationController isKindOfClass:[UIImagePickerController class]]){
+        
         // If popoverWidth and popoverHeight are specified and are greater than 0, then set popover size, else use apple's default popoverSize
         NSDictionary* options = self.pickerController.pictureOptions.popoverOptions;
         if(options) {
@@ -311,6 +312,8 @@ static NSString* toBase64(NSData* data) {
                 [viewController setPreferredContentSize:CGSizeMake(popoverWidth,popoverHeight)];
             }
         }
+        
+        
         UIImagePickerController* cameraPicker = (UIImagePickerController*)navigationController;
 
         if(![cameraPicker.mediaTypes containsObject:(NSString*)kUTTypeImage]){
@@ -628,17 +631,12 @@ static NSString* toBase64(NSData* data) {
 
 - (CDVPluginResult*)resultForVideo:(NSDictionary*)info
 {
-    @try {
-        NSString* moviePath = [[info objectForKey:UIImagePickerControllerMediaURL] absoluteString];
-        // On iOS 13 the movie path becomes inaccessible, create and return a copy
-        if (IsAtLeastiOSVersion(@"13.0")) {
-            moviePath = [self createTmpVideo:[[info objectForKey:UIImagePickerControllerMediaURL] path]];
-        }
-        return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:moviePath];
-    } @catch (NSException *exception) {
-        NSLog(@"Camera.resultForVideo: error retrieving file path");
-        return [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[exception reason]];
+    NSString* moviePath = [[info objectForKey:UIImagePickerControllerMediaURL] absoluteString];
+    // On iOS 13 the movie path becomes inaccessible, create and return a copy
+    if (IsAtLeastiOSVersion(@"13.0")) {
+        moviePath = [self createTmpVideo:[[info objectForKey:UIImagePickerControllerMediaURL] path]];
     }
+    return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:moviePath];
 }
 
 - (NSString *) createTmpVideo:(NSString *) moviePath {
@@ -900,9 +898,6 @@ static NSString* toBase64(NSData* data) {
     } else {
         NSArray* mediaArray = @[(NSString*)(pictureOptions.mediaType == MediaTypeVideo ? kUTTypeMovie : kUTTypeImage)];
         cameraPicker.mediaTypes = mediaArray;
-    }
-    if (@available(iOS 11.0, *)) {
-        cameraPicker.videoExportPreset = AVAssetExportPreset1920x1080; //full hd
     }
 
     return cameraPicker;
